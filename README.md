@@ -1,4 +1,4 @@
-Dev is the general-purpose dev tool for folks working cockroachdb/cockroach.
+Dev is a general-purpose dev tool for folks working on [cockroachdb/cockroach](https://github.com/cockroachdb/cockroach/).
 
     $ go get -u github.com/cockroachdb/dev
     $ go install github.com/cockroachdb/dev

@@ -13,9 +13,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -91,7 +93,19 @@ func getPathToBin(target string) (string, error) {
 			id := action.OutputIds[0]
 			for _, artifact := range result.Artifacts {
 				if artifact.ID == id {
-					return artifact.ExecPath, nil
+					binaryPath := strings.TrimPrefix(artifact.ExecPath, "bazel-out/")
+					var outputPath string
+					{
+						out, err := exec.Command("bazel", "info", "output_path").Output()
+						if err != nil {
+							return "", err
+						}
+						outputPath = strings.TrimSpace(string(out))
+					}
+					// This extra wrangling here is to avoid symlinking through `bazel-out`,
+					// given we avoid the convenience symlinks up above.
+					binaryPath = fmt.Sprintf("%s/%s", outputPath, binaryPath)
+					return binaryPath, nil
 				}
 			}
 		}
