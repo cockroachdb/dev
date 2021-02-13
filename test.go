@@ -13,7 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -33,10 +33,7 @@ var testCmd = &cobra.Command{
 	dev test --logic --files=prepare|fk --subtests=20042 --config=local
 	dev test --fuzz sql/sem/tree --filter=Decimal`,
 	Args: cobra.MinimumNArgs(0),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		return runTest(ctx, cmd, args)
-	},
+	RunE: runTest,
 }
 
 var (
@@ -77,12 +74,13 @@ func init() {
 	testCmd.Flags().String(filesFlag, "", "run logic tests for files matching this regex")
 	testCmd.Flags().String(subtestsFlag, "", "run logic test subtests matching this regex")
 	testCmd.Flags().String(configFlag, "", "run logic tests under the specified config")
-
-	// Shared flags.
-	testCmd.Flags().String(remoteCacheFlag, "", "remote caching endpoint to use")
 }
 
-func runTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
+// TODO(irfansharif): Add tests for the various bazel commands that get
+// generated from the set of provided user flags.
+
+func runTest(cmd *cobra.Command, pkgs []string) error {
+	ctx := context.Background()
 	if logicTest := mustGetFlagBool(cmd, logicFlag); logicTest {
 		return runLogicTest(cmd)
 	}
@@ -102,34 +100,67 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 	ignoreCache := mustGetFlagBool(cmd, ignoreCacheFlag)
 	verbose := mustGetFlagBool(cmd, vFlag)
 	showLogs := mustGetFlagBool(cmd, showLogsFlag)
-	cAddr := mustGetFlagString(cmd, remoteCacheFlag)
 
 	if showLogs {
 		return errors.New("-show-logs unimplemented")
 	}
 
-	log.Printf("unit test args: stress=%t  race=%t  filter=%s  timeout=%s  ignore-cache=%t  pkgs=%s",
+	debugLogger.Printf("unit test args: stress=%t  race=%t  filter=%s  timeout=%s  ignore-cache=%t  pkgs=%s",
 		stress, race, filter, timeout, ignoreCache, pkgs)
 
 	var args []string
 	args = append(args, "test")
+	args = append(args, "--color=yes")
+	args = append(args, "--experimental_convenience_symlinks=ignore") // don't generate any convenience symlinks
+	args = append(args, mustGetRemoteCacheArgs(remoteCacheAddr)...)
 	if race {
 		args = append(args, "--features", "race")
 	}
-	args = append(args, "--color=yes")
-	if cAddr != "" {
-		args = append(args, "--remote_local_fallback")
-		args = append(args, fmt.Sprintf("--remote_cache=grpc://%s", cAddr))
-		args = append(args, fmt.Sprintf("--experimental_remote_downloader=grpc://%s", cAddr))
-	}
 
 	for _, pkg := range pkgs {
+		if !strings.HasPrefix(pkg, "pkg/") {
+			return errors.Newf("malformed package %q, expecting %q", pkg, "pkg/{...}")
+		}
+
 		if strings.HasSuffix(pkg, "...") {
-			args = append(args, fmt.Sprintf("@cockroach//%s", pkg))
+			// Similar to `go test`, we implement `...` expansion to allow
+			// callers to use the following pattern to test all packages under a
+			// named one:
+			//
+			//     dev test pkg/util/... -v
+			//
+			// NB: We'll want to filter for just the go_test targets here. Not
+			// doing so prompts bazel to try and build all named targets. This
+			// is undesirable for the various `*_proto` targets seeing as how
+			// they're not buildable in isolation. This is because we often
+			// attach methods to proto types in hand-written files, files that
+			// are not picked up by the proto bazel targets[1]. Regular bazel
+			// compilation is still fine seeing as how the top-level go_library
+			// targets both embeds the proto target, and sources the
+			// hand-written file. But the proto target in isolation may not be
+			// buildable because without those additional methods, those types
+			// may fail to satisfy required interfaces.
+			//
+			// So, blinding selecting for all targets won't work, and we'll want
+			// to filter things out first.
+			//
+			// [1]: pkg/rpc/heartbeat.proto is one example of this pattern,
+			// where we define `Stringer` separately for the `RemoteOffset`
+			// type.
+			{
+				out, err := exec.Command("bazel", "query", fmt.Sprintf("kind(go_test,  //%s)", pkg)).Output()
+				if err != nil {
+					return err
+				}
+				targets := strings.TrimSpace(string(out))
+				for _, target := range strings.Split(targets, "\n") {
+					args = append(args, target)
+				}
+			}
 		} else {
 			components := strings.Split(pkg, "/")
 			pkgName := components[len(components)-1]
-			args = append(args, fmt.Sprintf("@cockroach//%s:%s_test", pkg, pkgName))
+			args = append(args, fmt.Sprintf("//%s:%s_test", pkg, pkgName))
 		}
 	}
 
@@ -156,7 +187,7 @@ func runLogicTest(cmd *cobra.Command) error {
 	subtests := mustGetFlagString(cmd, subtestsFlag)
 	config := mustGetFlagString(cmd, configFlag)
 
-	log.Printf("logic test args: files=%s  subtests=%s  config=%s",
+	debugLogger.Printf("logic test args: files=%s  subtests=%s  config=%s",
 		files, subtests, config)
 	return errors.New("--logic unimplemented")
 }
@@ -164,6 +195,6 @@ func runLogicTest(cmd *cobra.Command) error {
 func runFuzzTest(cmd *cobra.Command, pkgs []string) error {
 	filter := mustGetFlagString(cmd, filterFlag)
 
-	log.Printf("fuzz test args: filter=%s  pkgs=%s", filter, pkgs)
+	debugLogger.Printf("fuzz test args: filter=%s  pkgs=%s", filter, pkgs)
 	return errors.New("--fuzz unimplemented")
 }
