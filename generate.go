@@ -12,6 +12,11 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"path"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
@@ -73,5 +78,19 @@ func runGenerate(cmd *cobra.Command, targets []string) error {
 }
 
 func generateBazel(ctx context.Context, cmd *cobra.Command) error {
-	return execute(ctx, "bazel", "run", "@cockroach//:gazelle", "--color=yes")
+	if err := execute(ctx, "bazel", "run", "//:gazelle", "--", "update-repos", "-from_file=go.mod", "-build_file_proto_mode=disable_global", "-to_macro=DEPS.bzl%go_deps", "-prune=true"); err != nil {
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	buf, err := exec.Command("bazel", "run", "//pkg/cmd/generate-test-suites", "--run_under", fmt.Sprintf("cd %s &&", cwd)).Output()
+	if err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(path.Join(cwd, "pkg/BUILD.bazel"), buf, 0644); err != nil {
+		return err
+	}
+	return execute(ctx, "bazel", "run", "//:gazelle")
 }
