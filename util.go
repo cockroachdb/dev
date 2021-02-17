@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -48,9 +49,38 @@ func mustGetFlagDuration(cmd *cobra.Command, name string) time.Duration {
 	return val
 }
 
+func parseAddr(addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", errors.Newf("invalid address %s", addr)
+	}
+
+	return fmt.Sprintf("%s:%s", ip, port), nil
+}
+
+func mustGetRemoteCacheArgs(cacheAddr string) []string {
+	if cacheAddr == "" {
+		return nil
+	}
+	cAddr, err := parseAddr(cacheAddr)
+	if err != nil {
+		log.Fatalf("unexpected error: %v", err)
+	}
+	var args []string
+	args = append(args, "--remote_local_fallback")
+	args = append(args, fmt.Sprintf("--remote_cache=grpc://%s", cAddr))
+	args = append(args, fmt.Sprintf("--experimental_remote_downloader=grpc://%s", cAddr))
+	return args
+}
+
 func execute(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	log.Printf("executing: %s", cmd.String())
+	debugLogger.Printf("executing: %s", cmd.String())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

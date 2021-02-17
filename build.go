@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -52,19 +51,8 @@ var buildTargetMapping = map[string]string{
 	"roachtest":        "//pkg/cmd/roachtest",
 }
 
-func init() {
-	// Shared flags.
-
-	// Wherever `buchr/bazel-remote` is running. We're somewhat tying ourselves
-	// to the one implementation, but that seems fine for now. It has support
-	// (very experimental) support for the  Remote Asset API, which helps speed
-	// things up when the cache sits across the network boundary.
-	buildCmd.Flags().String(remoteCacheFlag, "", "remote caching grpc endpoint to use")
-}
-
 func runBuild(cmd *cobra.Command, targets []string) error {
 	ctx := context.Background()
-
 	if len(targets) == 0 {
 		// Default to building the cockroach binary.
 		targets = append(targets, "cockroach")
@@ -80,11 +68,7 @@ func runBuild(cmd *cobra.Command, targets []string) error {
 	// Don't let bazel generate any convenience symlinks, we'll create them
 	// ourself.
 	args = append(args, "--experimental_convenience_symlinks=ignore")
-	if cAddr := mustGetFlagString(cmd, remoteCacheFlag); cAddr != "" {
-		args = append(args, "--remote_local_fallback")
-		args = append(args, fmt.Sprintf("--remote_cache=grpc://%s", cAddr))
-		args = append(args, fmt.Sprintf("--experimental_remote_downloader=grpc://%s", cAddr))
-	}
+	args = append(args, mustGetRemoteCacheArgs(remoteCacheAddr)...)
 
 	for _, target := range targets {
 		buildTarget, ok := buildTargetMapping[target]
