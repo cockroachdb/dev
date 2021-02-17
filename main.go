@@ -49,7 +49,10 @@ lets engineers do a few things:
 	SilenceErrors: true,
 }
 
-var bazel = "bazel"
+var (
+	bazel           = "bazel"
+	remoteCacheFlag = "remote-cache"
+)
 
 func init() {
 	log.SetFlags(0)
@@ -84,7 +87,7 @@ func runDev() error {
 
 func main() {
 	if err := runDev(); err != nil {
-		log.Printf("%v", err)
+		log.Printf("error: %v", err)
 		os.Exit(1)
 	}
 }

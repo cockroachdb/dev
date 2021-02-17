@@ -77,6 +77,9 @@ func init() {
 	testCmd.Flags().String(filesFlag, "", "run logic tests for files matching this regex")
 	testCmd.Flags().String(subtestsFlag, "", "run logic test subtests matching this regex")
 	testCmd.Flags().String(configFlag, "", "run logic tests under the specified config")
+
+	// Shared flags.
+	testCmd.Flags().String(remoteCacheFlag, "", "remote caching endpoint to use")
 }
 
 func runTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
@@ -99,6 +102,7 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 	ignoreCache := mustGetFlagBool(cmd, ignoreCacheFlag)
 	verbose := mustGetFlagBool(cmd, vFlag)
 	showLogs := mustGetFlagBool(cmd, showLogsFlag)
+	cAddr := mustGetFlagString(cmd, remoteCacheFlag)
 
 	if showLogs {
 		return errors.New("-show-logs unimplemented")
@@ -113,6 +117,11 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 		args = append(args, "--features", "race")
 	}
 	args = append(args, "--color=yes")
+	if cAddr != "" {
+		args = append(args, "--remote_local_fallback")
+		args = append(args, fmt.Sprintf("--remote_cache=grpc://%s", cAddr))
+		args = append(args, fmt.Sprintf("--experimental_remote_downloader=grpc://%s", cAddr))
+	}
 
 	for _, pkg := range pkgs {
 		if strings.HasSuffix(pkg, "...") {
