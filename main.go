@@ -52,6 +52,7 @@ lets engineers do a few things:
 
 var (
 	remoteCacheAddr string
+	numCPUs         int
 	debugLogger     = log.New(ioutil.Discard, "DEBUG: ", 0)
 )
 
@@ -70,7 +71,8 @@ func init() {
 	// Add all the shared flags.
 	var debugVar bool
 	for _, cmd := range cmds {
-		cmd.Flags().BoolVar(&debugVar, "debug", false, "enable debug logging for dev itself")
+		cmd.Flags().BoolVar(&debugVar, "debug", false, "enable debug logging for dev")
+		cmd.Flags().IntVar(&numCPUs, "cpus", 0, "cap the number of cpu cores used")
 		// This points to the grpc endpoint of a running `buchr/bazel-remote`
 		// instance. We're tying ourselves to the one implementation, but that
 		// seems fine for now. It seems mature, and has (very experimental)

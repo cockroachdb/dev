@@ -113,6 +113,9 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 	args = append(args, "--color=yes")
 	args = append(args, "--experimental_convenience_symlinks=ignore") // don't generate any convenience symlinks
 	args = append(args, mustGetRemoteCacheArgs(remoteCacheAddr)...)
+	if numCPUs != 0 {
+		args = append(args, fmt.Sprintf("--local_cpu_resources=%d", numCPUs))
+	}
 	if race {
 		args = append(args, "--features", "race")
 	}
