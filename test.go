@@ -11,30 +11,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 )
-
-// testCmd runs the specified cockroachdb tests.
-var testCmd = &cobra.Command{
-	Use:   "test [pkg..]",
-	Short: `Run the specified tests`,
-	Long:  `Run the specified tests.`,
-	Example: `
-	dev test
-	dev test pkg/kv/kvserver --filter=TestReplicaGC* -v -show-logs --timeout=1m
-	dev test --stress --race ...
-	dev test --logic --files=prepare|fk --subtests=20042 --config=local
-	dev test --fuzz sql/sem/tree --filter=Decimal`,
-	Args: cobra.MinimumNArgs(0),
-	RunE: runTest,
-}
 
 var (
 	// General testing flags.
@@ -56,7 +39,21 @@ var (
 	configFlag   = "config"
 )
 
-func init() {
+func makeTestCmd(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	// testCmd runs the specified cockroachdb tests.
+	testCmd := &cobra.Command{
+		Use:   "test [pkg..]",
+		Short: `Run the specified tests`,
+		Long:  `Run the specified tests.`,
+		Example: `
+	dev test
+	dev test pkg/kv/kvserver --filter=TestReplicaGC* -v -show-logs --timeout=1m
+	dev test --stress --race ...
+	dev test --logic --files=prepare|fk --subtests=20042 --config=local
+	dev test --fuzz sql/sem/tree --filter=Decimal`,
+		Args: cobra.MinimumNArgs(0),
+		RunE: runE,
+	}
 	// Attach flags for the test sub-command.
 	testCmd.Flags().StringP(filterFlag, "f", "", "run unit tests matching this regex")
 	testCmd.Flags().Duration(timeoutFlag, 20*time.Minute, "timeout for test")
@@ -74,25 +71,26 @@ func init() {
 	testCmd.Flags().String(filesFlag, "", "run logic tests for files matching this regex")
 	testCmd.Flags().String(subtestsFlag, "", "run logic test subtests matching this regex")
 	testCmd.Flags().String(configFlag, "", "run logic tests under the specified config")
+	return testCmd
 }
 
 // TODO(irfansharif): Add tests for the various bazel commands that get
 // generated from the set of provided user flags.
 
-func runTest(cmd *cobra.Command, pkgs []string) error {
-	ctx := context.Background()
+func (d *dev) test(cmd *cobra.Command, pkgs []string) error {
 	if logicTest := mustGetFlagBool(cmd, logicFlag); logicTest {
-		return runLogicTest(cmd)
+		return d.runLogicTest(cmd)
 	}
 
 	if fuzzTest := mustGetFlagBool(cmd, fuzzFlag); fuzzTest {
-		return runFuzzTest(cmd, pkgs)
+		return d.runFuzzTest(cmd, pkgs)
 	}
 
-	return runUnitTest(ctx, cmd, pkgs)
+	return d.runUnitTest(cmd, pkgs)
 }
 
-func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
+func (d *dev) runUnitTest(cmd *cobra.Command, pkgs []string) error {
+	ctx := cmd.Context()
 	stress := mustGetFlagBool(cmd, stressFlag)
 	race := mustGetFlagBool(cmd, raceFlag)
 	filter := mustGetFlagString(cmd, filterFlag)
@@ -105,7 +103,7 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 		return errors.New("-show-logs unimplemented")
 	}
 
-	debugLogger.Printf("unit test args: stress=%t  race=%t  filter=%s  timeout=%s  ignore-cache=%t  pkgs=%s",
+	d.log.Printf("unit test args: stress=%t  race=%t  filter=%s  timeout=%s  ignore-cache=%t  pkgs=%s",
 		stress, race, filter, timeout, ignoreCache, pkgs)
 
 	var args []string
@@ -151,7 +149,7 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 			// where we define `Stringer` separately for the `RemoteOffset`
 			// type.
 			{
-				out, err := exec.Command("bazel", "query", fmt.Sprintf("kind(go_test,  //%s)", pkg)).Output()
+				out, err := d.exec.CommandContext(ctx, "bazel", "query", fmt.Sprintf("kind(go_test,  //%s)", pkg))
 				if err != nil {
 					return err
 				}
@@ -184,22 +182,23 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 		args = append(args, "--test_output", "errors")
 	}
 
-	return execute(ctx, "bazel", args...)
+	_, err := d.exec.CommandContext(ctx, "bazel", args...)
+	return err
 }
 
-func runLogicTest(cmd *cobra.Command) error {
+func (d *dev) runLogicTest(cmd *cobra.Command) error {
 	files := mustGetFlagString(cmd, filesFlag)
 	subtests := mustGetFlagString(cmd, subtestsFlag)
 	config := mustGetFlagString(cmd, configFlag)
 
-	debugLogger.Printf("logic test args: files=%s  subtests=%s  config=%s",
+	d.log.Printf("logic test args: files=%s  subtests=%s  config=%s",
 		files, subtests, config)
 	return errors.New("--logic unimplemented")
 }
 
-func runFuzzTest(cmd *cobra.Command, pkgs []string) error {
+func (d *dev) runFuzzTest(cmd *cobra.Command, pkgs []string) error {
 	filter := mustGetFlagString(cmd, filterFlag)
 
-	debugLogger.Printf("fuzz test args: filter=%s  pkgs=%s", filter, pkgs)
+	d.log.Printf("fuzz test args: filter=%s  pkgs=%s", filter, pkgs)
 	return errors.New("--fuzz unimplemented")
 }

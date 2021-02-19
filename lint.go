@@ -15,18 +15,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// lintCmd runs the specified linters.
-var lintCmd = &cobra.Command{
-	Use:   "lint",
-	Short: `Run the specified linters`,
-	Long:  `Run the specified linters.`,
-	Example: `
+// makeLintCmd constructs the subcommand used to run the specified linters.
+func makeLintCmd(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   "lint",
+		Short: `Run the specified linters`,
+		Long:  `Run the specified linters.`,
+		Example: `
 	dev lint --filter=TestLowercaseFunctionNames --short --timeout=1m`,
-	Args: cobra.NoArgs,
-	RunE: runLint,
+		Args: cobra.NoArgs,
+		RunE: runE,
+	}
 }
 
-func runLint(cmd *cobra.Command, args []string) error {
+func (*dev) lint(cmd *cobra.Command, args []string) error {
 	// TODO(irfansharif): Flesh out the example usage patterns.
 	return errors.New("unimplemented")
 }

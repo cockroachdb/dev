@@ -11,14 +11,9 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -49,18 +44,7 @@ func mustGetFlagDuration(cmd *cobra.Command, name string) time.Duration {
 	return val
 }
 
-func parseAddr(addr string) (string, error) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "", err
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return "", errors.Newf("invalid address %s", addr)
-	}
-
-	return fmt.Sprintf("%s:%s", ip, port), nil
+type f interface {
 }
 
 func mustGetRemoteCacheArgs(cacheAddr string) []string {
@@ -78,68 +62,16 @@ func mustGetRemoteCacheArgs(cacheAddr string) []string {
 	return args
 }
 
-func execute(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	debugLogger.Printf("executing: %s", cmd.String())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func getPathToBin(target string) (string, error) {
-	// actionQueryResult is used to unmarshal the results of the bazel action
-	// query.
-	type actionQueryResult struct {
-		Artifacts []struct {
-			ID       string `json:"id"`
-			ExecPath string `json:"execPath"`
-		} `json:"artifacts"`
-
-		Actions []struct {
-			Mnemonic  string   `json:"mnemonic"`
-			OutputIds []string `json:"outputIds"`
-		} `json:"actions"`
-	}
-
-	buf, err := exec.Command("bazel", "aquery", target, "--output=jsonproto").Output()
+func parseAddr(addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "", err
 	}
 
-	var result actionQueryResult
-	if err := json.Unmarshal(buf, &result); err != nil {
-		return "", err
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", errors.Newf("invalid address %s", addr)
 	}
 
-	const binaryMnemomic = "GoLink"
-	for _, action := range result.Actions {
-		if action.Mnemonic == binaryMnemomic {
-			id := action.OutputIds[0]
-			for _, artifact := range result.Artifacts {
-				if artifact.ID == id {
-					binaryPath := strings.TrimPrefix(artifact.ExecPath, "bazel-out/")
-					var outputPath string
-					{
-						out, err := exec.Command("bazel", "info", "output_path").Output()
-						if err != nil {
-							return "", err
-						}
-						outputPath = strings.TrimSpace(string(out))
-					}
-					// This extra wrangling here is to avoid symlinking through `bazel-out`,
-					// given we avoid the convenience symlinks up above.
-					binaryPath = fmt.Sprintf("%s/%s", outputPath, binaryPath)
-					return binaryPath, nil
-				}
-			}
-		}
-	}
-
-	return "", errors.Newf("could not find path to binary %q", target)
+	return fmt.Sprintf("%s:%s", ip, port), nil
 }
