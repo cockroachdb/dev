@@ -180,6 +180,8 @@ func runUnitTest(ctx context.Context, cmd *cobra.Command, pkgs []string) error {
 	}
 	if verbose {
 		args = append(args, "--test_output", "all", "--test_arg", "-test.v")
+	} else {
+		args = append(args, "--test_output", "errors")
 	}
 
 	return execute(ctx, "bazel", args...)
