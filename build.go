@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -69,6 +70,9 @@ func runBuild(cmd *cobra.Command, targets []string) error {
 	// ourself.
 	args = append(args, "--experimental_convenience_symlinks=ignore")
 	args = append(args, mustGetRemoteCacheArgs(remoteCacheAddr)...)
+	if numCPUs != 0 {
+		args = append(args, fmt.Sprintf("--local_cpu_resources=%d", numCPUs))
+	}
 
 	for _, target := range targets {
 		buildTarget, ok := buildTargetMapping[target]
