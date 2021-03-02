@@ -12,9 +12,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"path"
 	"strings"
 
@@ -23,19 +22,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// buildCmd builds the specified binaries.
-var buildCmd = &cobra.Command{
-	Use:   "build <binary>",
-	Short: "Build the specified binaries",
-	Long:  "Build the specified binaries.",
-	// TODO(irfansharif): Flesh out the example usage patterns.
-	Example: `
+// makeBuildCmd constructs the subcommand used to build the specified binaries.
+func makeBuildCmd(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   "build <binary>",
+		Short: "Build the specified binaries",
+		Long:  "Build the specified binaries.",
+		// TODO(irfansharif): Flesh out the example usage patterns.
+		Example: `
 	dev build cockroach --tags=deadlock
 	dev build cockroach-{short,oss}
 	dev build {opt,exec}gen`,
-	Args: cobra.MinimumNArgs(0),
-	RunE: runBuild,
+		Args: cobra.MinimumNArgs(0),
+		RunE: runE,
+	}
 }
+
+// TODO(irfansharif): Add grouping shorthands like "all" or "bins", etc.
+// TODO(irfansharif): Make sure all the relevant binary targets are defined
+// above, and in usage docs.
 
 var buildTargetMapping = map[string]string{
 	"cockroach":        "//pkg/cmd/cockroach",
@@ -52,16 +57,13 @@ var buildTargetMapping = map[string]string{
 	"roachtest":        "//pkg/cmd/roachtest",
 }
 
-func runBuild(cmd *cobra.Command, targets []string) error {
-	ctx := context.Background()
+func (d *dev) build(cmd *cobra.Command, targets []string) (err error) {
+	ctx := cmd.Context()
+
 	if len(targets) == 0 {
 		// Default to building the cockroach binary.
 		targets = append(targets, "cockroach")
 	}
-
-	// TODO(irfansharif): Add grouping shorthands like "all" or "bins", etc.
-	// TODO(irfansharif): Make sure all the relevant binary targets are defined
-	// above, and in usage docs.
 
 	var args []string
 	args = append(args, "build")
@@ -82,16 +84,18 @@ func runBuild(cmd *cobra.Command, targets []string) error {
 
 		args = append(args, buildTarget)
 	}
-	if err := execute(ctx, "bazel", args...); err != nil {
+
+	if _, err := d.exec.CommandContext(ctx, "bazel", args...); err != nil {
 		return err
 	}
-	return symlinkBinaries(targets)
+
+	return d.symlinkBinaries(ctx, targets)
 }
 
-func symlinkBinaries(targets []string) error {
+func (d *dev) symlinkBinaries(ctx context.Context, targets []string) error {
 	var workspace string
 	{
-		out, err := exec.Command("bazel", "info", "workspace").Output()
+		out, err := d.exec.CommandContextSilent(ctx, "bazel", "info", "workspace", "--color=yes")
 		if err != nil {
 			return err
 		}
@@ -99,13 +103,13 @@ func symlinkBinaries(targets []string) error {
 	}
 
 	// Create the bin directory.
-	if err := os.MkdirAll(path.Join(workspace, "bin"), 0755); err != nil {
+	if err := d.os.MkdirAll(path.Join(workspace, "bin")); err != nil {
 		return err
 	}
 
 	for _, target := range targets {
 		buildTarget := buildTargetMapping[target]
-		binaryPath, err := getPathToBin(buildTarget)
+		binaryPath, err := d.getPathToBin(ctx, buildTarget)
 		if err != nil {
 			return err
 		}
@@ -120,13 +124,65 @@ func symlinkBinaries(targets []string) error {
 		}
 
 		// Symlink from binaryPath -> symlinkPath
-		if err := os.Remove(symlinkPath); err != nil && !oserror.IsNotExist(err) {
+		if err := d.os.Remove(symlinkPath); err != nil && !oserror.IsNotExist(err) {
 			return err
 		}
-		if err := os.Symlink(binaryPath, symlinkPath); err != nil {
+		if err := d.os.Symlink(binaryPath, symlinkPath); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (d *dev) getPathToBin(ctx context.Context, target string) (string, error) {
+	// actionQueryResult is used to unmarshal the results of the bazel action
+	// query.
+	type actionQueryResult struct {
+		Artifacts []struct {
+			ID       string `json:"id"`
+			ExecPath string `json:"execPath"`
+		} `json:"artifacts"`
+
+		Actions []struct {
+			Mnemonic  string   `json:"mnemonic"`
+			OutputIds []string `json:"outputIds"`
+		} `json:"actions"`
+	}
+
+	buf, err := d.exec.CommandContextSilent(ctx, "bazel", "aquery", target, "--output=jsonproto", "--color=yes")
+	if err != nil {
+		return "", err
+	}
+
+	var result actionQueryResult
+	if err := json.Unmarshal(buf, &result); err != nil {
+		return "", err
+	}
+
+	const binaryMnemomic = "GoLink"
+	for _, action := range result.Actions {
+		if action.Mnemonic == binaryMnemomic {
+			id := action.OutputIds[0]
+			for _, artifact := range result.Artifacts {
+				if artifact.ID == id {
+					binaryPath := strings.TrimPrefix(artifact.ExecPath, "bazel-out/")
+					var outputPath string
+					{
+						out, err := d.exec.CommandContextSilent(ctx, "bazel", "info", "output_path", "--color=yes")
+						if err != nil {
+							return "", err
+						}
+						outputPath = strings.TrimSpace(string(out))
+					}
+					// This extra wrangling here is to avoid symlinking through `bazel-out`,
+					// given we avoid the convenience symlinks up above.
+					binaryPath = fmt.Sprintf("%s/%s", outputPath, binaryPath)
+					return binaryPath, nil
+				}
+			}
+		}
+	}
+
+	return "", errors.Newf("could not find path to binary %q", target)
 }

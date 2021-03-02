@@ -15,18 +15,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// benchCmd runs the specified cockroachdb benchmarks.
-var benchCmd = &cobra.Command{
-	Use:   "bench",
-	Short: `Run the specified benchmarks`,
-	Long:  `Run the specified benchmarks.`,
-	Example: `
+// makeBenchCmd constructs the subcommand used to run the specified benchmarks.
+func makeBenchCmd(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   "bench",
+		Short: `Run the specified benchmarks`,
+		Long:  `Run the specified benchmarks.`,
+		Example: `
 	dev bench --pkg=sql/parser --filter=BenchmarkParse`,
-	Args: cobra.NoArgs,
-	RunE: runBench,
+		Args: cobra.NoArgs,
+		RunE: runE,
+	}
 }
 
-func runBench(cmd *cobra.Command, args []string) error {
+func (*dev) bench(*cobra.Command, []string) error {
 	// TODO(irfansharif): Flesh out the example usage patterns.
 	return errors.New("unimplemented")
 }

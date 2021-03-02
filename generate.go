@@ -11,65 +11,54 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"os/exec"
 	"path"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 )
 
-// generateCmd generates the specified files.
-var generateCmd = &cobra.Command{
-	Use:     "generate [target..]",
-	Aliases: []string{"gen"},
-	Short:   `Generate the specified files`,
-	Long:    `Generate the specified files.`,
-	Example: `
+// makeGenerateCmd constructs the subcommand used to generate the specified
+// artifacts.
+func makeGenerateCmd(runE func(cmd *cobra.Command, args []string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:     "generate [target..]",
+		Aliases: []string{"gen"},
+		Short:   `Generate the specified files`,
+		Long:    `Generate the specified files.`,
+		Example: `
 	dev generate
 	dev generate bazel
 	dev generate protobuf
 	dev generate {exec,opt}gen`,
-	Args: cobra.MinimumNArgs(0),
-	// TODO(irfansharif): Errors but default just eaten up. Let's wrap these
-	// invocations in something that prints out the appropriate error log
-	// (especially considering we've SilenceErrors-ed things away).
-	RunE: runGenerate,
+		Args: cobra.MinimumNArgs(0),
+		// TODO(irfansharif): Errors but default just eaten up. Let's wrap these
+		// invocations in something that prints out the appropriate error log
+		// (especially considering we've SilenceErrors-ed things away).
+		RunE: runE,
+	}
 }
 
-// TODO(irfansharif): Flesh out the remaining targets.
-type generator func(ctx context.Context, cmd *cobra.Command) error
-
-var generators = []generator{
-	generateBazel,
-}
-
-func runGenerate(cmd *cobra.Command, targets []string) error {
-	ctx := context.Background()
+func (d *dev) generate(cmd *cobra.Command, targets []string) error {
+	// TODO(irfansharif): Flesh out the remaining targets.
+	var generatorTargetMapping = map[string]func(cmd *cobra.Command) error{
+		"bazel": d.generateBazel,
+	}
 
 	if len(targets) == 0 {
-		// Generate all targets.
-		for _, gen := range generators {
-			if err := gen(ctx, cmd); err != nil {
-				return err
-			}
+		// Collect all the targets.
+		for target := range generatorTargetMapping {
+			targets = append(targets, target)
 		}
-		return nil
 	}
 
 	for _, target := range targets {
-		var gen generator
-		switch target {
-		case "bazel":
-			gen = generateBazel
-		default:
+		generator, ok := generatorTargetMapping[target]
+		if !ok {
 			return errors.Newf("unrecognized target: %s", target)
 		}
 
-		if err := gen(ctx, cmd); err != nil {
+		if err := generator(cmd); err != nil {
 			return err
 		}
 	}
@@ -77,20 +66,35 @@ func runGenerate(cmd *cobra.Command, targets []string) error {
 	return nil
 }
 
-func generateBazel(ctx context.Context, cmd *cobra.Command) error {
-	if err := execute(ctx, "bazel", "run", "//:gazelle", "--", "update-repos", "-from_file=go.mod", "-build_file_proto_mode=disable_global", "-to_macro=DEPS.bzl%go_deps", "-prune=true"); err != nil {
-		return err
-	}
-	cwd, err := os.Getwd()
+func (d *dev) generateBazel(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+	var err error
+	_, err = d.exec.CommandContext(ctx, "bazel",
+		"run", "//:gazelle", "--color=yes", "--", "update-repos",
+		"-from_file=go.mod", "-build_file_proto_mode=disable_global",
+		"-to_macro=DEPS.bzl%go_deps", "-prune=true",
+	)
 	if err != nil {
 		return err
 	}
-	buf, err := exec.Command("bazel", "run", "//pkg/cmd/generate-test-suites", "--run_under", fmt.Sprintf("cd %s &&", cwd)).Output()
+
+	cwd, err := d.os.Getwd()
 	if err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(path.Join(cwd, "pkg/BUILD.bazel"), buf, 0644); err != nil {
+
+	buffer, err := d.exec.CommandContext(ctx, "bazel",
+		"run", "//pkg/cmd/generate-test-suites", "--color=yes",
+		"--run_under", fmt.Sprintf("cd %s &&", cwd),
+	)
+	if err != nil {
 		return err
 	}
-	return execute(ctx, "bazel", "run", "//:gazelle")
+
+	if err := d.os.WriteFile(path.Join(cwd, "pkg/BUILD.bazel"), buffer); err != nil {
+		return err
+	}
+
+	_, err = d.exec.CommandContext(ctx, "bazel", "run", "@cockroach//:gazelle", "--color=yes")
+	return err
 }

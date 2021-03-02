@@ -19,3 +19,7 @@ Dev is a general-purpose dev tool for folks working on [cockroachdb/cockroach](h
         -v, --version   version for dev
 
       Use "dev [command] --help" for more information about a command.
+
+To update the testdata files:
+
+    $ go test -run TestDatadriven -rewrite [-record] [-from-checkout=<path-to-crdb-checkout>]
