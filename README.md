@@ -1,3 +1,6 @@
+WARNING: `dev` isn't feature-complete, and the migration to Bazel at Cockroach
+is still in-progress. Proceed at your own risk :)
+
 Dev is a general-purpose dev tool for folks working on [cockroachdb/cockroach](https://github.com/cockroachdb/cockroach/).
 
     $ go get -u github.com/cockroachdb/dev
